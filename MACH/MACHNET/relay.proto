@@ -1,0 +1,12 @@
+syntax = "proto3";
+package relay;
+
+option go_package = "MACHNET/relay";
+
+message Message{
+    string body = 1;
+}
+
+service RelayService{
+    rpc RelayData(Message) returns (Message) {}
+}

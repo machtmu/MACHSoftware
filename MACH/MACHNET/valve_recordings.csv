@@ -1,0 +1,19 @@
+timestamp,port,name,state,input_voltage
+2025-03-08 16:03:08,FIO0,middle,True,3.3
+2025-03-08 16:03:08,FIO2,left,False,3.3
+2025-03-08 16:03:08,FIO1,right,False,3.3
+2025-03-08 16:03:09,FIO0,middle,True,3.3
+2025-03-08 16:03:09,FIO2,left,False,3.3
+2025-03-08 16:03:09,FIO1,right,False,3.3
+2025-03-08 16:03:10,FIO0,middle,True,3.3
+2025-03-08 16:03:10,FIO2,left,False,3.3
+2025-03-08 16:03:10,FIO1,right,False,3.3
+2025-03-08 16:03:11,FIO0,middle,True,3.3
+2025-03-08 16:03:11,FIO2,left,False,3.3
+2025-03-08 16:03:11,FIO1,right,False,3.3
+2025-03-08 16:03:12,FIO0,middle,True,3.3
+2025-03-08 16:03:12,FIO2,left,False,3.3
+2025-03-08 16:03:12,FIO1,right,False,3.3
+2025-03-08 16:03:13,FIO0,middle,True,3.3
+2025-03-08 16:03:13,FIO2,left,False,3.3
+2025-03-08 16:03:13,FIO1,right,False,3.3

@@ -1,0 +1,29 @@
+{
+    "canvas": {
+        "width": 800,
+        "height": 600
+    },
+    "groups": [
+        {
+            "name": "Valves",
+            "x": 884,
+            "y": 131,
+            "width": 578,
+            "height": 234
+        },
+        {
+            "name": "Pressure Transducer",
+            "x": 100,
+            "y": 100,
+            "width": 363,
+            "height": 242
+        },
+        {
+            "name": "Load Cell Amp",
+            "x": 918,
+            "y": 447,
+            "width": 362,
+            "height": 293
+        }
+    ]
+}
