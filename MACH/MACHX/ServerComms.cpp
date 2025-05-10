@@ -1,102 +1,105 @@
 #include <windows.h>
 #include <iostream>
-#include <unistd.h>
+#include <string>
+#include <memory>
+#include "ServerComms.hpp"
+
+using namespace std;
 
 #define memSize 2048
 const char* memName = "Local\\MySharedMemory";
 
+// RAII wrapper for Windows handles
+class HandleGuard {
+public:
+    explicit HandleGuard(HANDLE h) : handle(h) {}
+    ~HandleGuard() { if (handle) CloseHandle(handle); }
+    HANDLE get() const { return handle; }
+private:
+    HANDLE handle;
+};
+
+// RAII wrapper for memory mapping
+class MemoryGuard {
+public:
+    explicit MemoryGuard(HANDLE h) : handle(h), buffer(nullptr) {
+        buffer = MapViewOfFile(handle, FILE_MAP_ALL_ACCESS, 0, 0, memSize);
+        if (!buffer) {
+            throw MemoryError("Failed to map view of file: " + to_string(GetLastError()));
+        }
+    }
+    ~MemoryGuard() { if (buffer) UnmapViewOfFile(buffer); }
+    char* get() const { return buffer; }
+private:
+    HANDLE handle;
+    char* buffer;
+};
+
 char* ReadMemory()
 {
-    HANDLE handle = OpenFileMapping(
-        FILE_MAP_ALL_ACCESS,
-        FALSE,
-        memName
-    );
+    try {
+        HandleGuard handle(OpenFileMapping(
+            FILE_MAP_ALL_ACCESS,
+            FALSE,
+            memName
+        ));
+        if (!handle.get()) {
+            return new char[1]{'P'};
+        }    
 
-    if(handle == NULL)
-    {
-        //std::cerr << "couldent make a map" << GetLastError() << std::endl;
-        char* result = (char*)"P";
-        return result;
-    }    
+        MemoryGuard memory(handle.get());
+        char* result = new char[memSize];
+        memcpy(result, memory.get(), memSize);    
 
-    char* pBuffer = (char*)MapViewOfFile(
-        handle,
-        FILE_MAP_ALL_ACCESS,
-        0, 0, memSize
-    );
-
-    if(pBuffer == NULL)
-    {
-        //std::cerr << "could not map view of file " << GetLastError() << std::endl;
-        CloseHandle(handle);
-        char* result = (char*)"P";
         return result;
     }
-
-    WaitForSingleObject(handle, INFINITE);
-
-    char* result = new char[memSize];
-    memcpy(result, pBuffer, memSize);    
-
-    UnmapViewOfFile(pBuffer);
-    CloseHandle(handle);
-
-    return result;
+    catch (const exception& e) {
+        cerr << "Error reading memory: " << e.what() << endl;
+        return new char[1]{'P'};
+    }
 }
 
-void WriteMemory(char* input, bool re)
+void WriteMemory(const char* input, bool wait_for_response)
 {
-    //std::cout << "legendary";
-    HANDLE handle = CreateFileMapping(
-                        INVALID_HANDLE_VALUE,
-                        NULL,
-                        PAGE_READWRITE,
-                        0, memSize,
-                        memName
-    );
-    
-
-    if(handle == NULL)
-    {
-        //std::cerr << "couldent make a map" << GetLastError() << std::endl;
-    }    
-
-    char* pBuffer = (char*)MapViewOfFile(
-        handle,
-        FILE_MAP_ALL_ACCESS,
-        0, 0, memSize
-    );
-
-    
-
-    if(pBuffer == NULL)
-    {
-        //std::cerr << "could not map view of file " << GetLastError() << std::endl;
-        CloseHandle(handle);
+    if (!input) {
+        throw MemoryError("Null input pointer");
     }
 
-    memset(pBuffer, 0, memSize);
+    try {
+        HandleGuard handle(CreateFileMapping(
+            INVALID_HANDLE_VALUE,
+            NULL,
+            PAGE_READWRITE,
+            0, memSize,
+            memName
+        ));
+        
+        if (!handle.get()) {
+            throw MemoryError("Failed to create file mapping: " + to_string(GetLastError()));
+        }    
 
-    strncpy(pBuffer, input, memSize - 1);
-    pBuffer[memSize - 1] = '\0';
+        MemoryGuard memory(handle.get());
+        memset(memory.get(), 0, memSize);
+        strncpy(memory.get(), input, memSize - 1);
+        memory.get()[memSize - 1] = '\0';
 
-    
-
-    UnmapViewOfFile(pBuffer);
-
-    int counter = 0;
-    while(ReadMemory()[0] != "L"[0] && re == true && counter <= 10000){
-        //std::cout << "im real";
-        counter += 1;
+        if (wait_for_response) {
+            int counter = 0;
+            while (counter < 10000) {
+                char* response = ReadMemory();
+                if (response[0] == 'L') {
+                    delete[] response;
+                    break;
+                }
+                delete[] response;
+                counter++;
+            }
+        }
     }
-
-    //std::cout << "legend";
-
-    //sleep(0.0001f);
-
-    CloseHandle(handle);
-
+    catch (const exception& e) {
+        cerr << "Error writing memory: " << e.what() << endl;
+        throw;
+    }
 }
 
 

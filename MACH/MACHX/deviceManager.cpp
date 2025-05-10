@@ -1,8 +1,16 @@
 #include <iostream>
+#include <mutex>
+#include <algorithm>
+#include <sstream>
 #include "deviceManager.hpp"
 #include "labjack.hpp"
 
 using namespace std;
+
+// Thread-safe device storage
+static vector<Valve> valves;
+static vector<Sensor> sensors;
+static mutex device_mutex;
 
 //for sensors init
 // sP320.0000010.00000.000001000.00 
@@ -13,160 +21,151 @@ using namespace std;
 int buffer = 7;
 int bufferValve = 3;
 
-vector<Valve> valves;
-vector<Sensor> sensors;
-
-void create_device(string input)
+void create_device(const string& input)
 {
-    if(input.substr(0,1) == "s")
-    {
-        bool create = true;
-        for(Sensor& s : sensors)
-        {
-            if(s.port == input.substr(1,4))
-            {
-                create = false;
-                s.port = input.substr(1,4);            
-                s.minVol = stod(input.substr(4,buffer));
-                s.maxVol = stod(input.substr(4+buffer,buffer));
-                s.minReading = stod(input.substr(4+buffer+buffer, buffer));
-                s.maxReading = stod(input.substr(4+buffer+buffer+buffer, buffer));
-            }
-        }
-
-        if (create == true)
-        {
-            Sensor newSensor = Sensor();
-            newSensor.port = input.substr(1,4);            
-            newSensor.minVol = stod(input.substr(4,buffer));
-            newSensor.maxVol = stod(input.substr(4+buffer,buffer));
-            newSensor.minReading = stod(input.substr(4+buffer+buffer, buffer));
-            newSensor.maxReading = stod(input.substr(4+buffer+buffer+buffer, buffer));
-            sensors.push_back(newSensor);
-        }
-        
-        //cout << input.substr(1,4);
+    if (input.empty()) {
+        throw DeviceError("Empty input string");
     }
-    else if(input.substr(0,1) == "v")
-    {
-        //cout << input.substr(1,4);
 
-        bool create = true;
-        for(Valve& v : valves)
-        {
-            if(v.port == input.substr(1,4))
-            {
-                create = false;
-                v.port = input.substr(1,4);
-                if(stoi(input.substr(5,1)) == 1)
-                {
-                    v.state = 1;
-                }
-                else
-                {
-                    v.state = 0;
-                }
+    lock_guard<mutex> lock(device_mutex);
 
-                v.inputVol = stod(input.substr(6,bufferValve));
+    // Check total device limit
+    if (valves.size() + sensors.size() >= MAX_DEVICES) {
+        throw DeviceError("Maximum number of devices reached");
+    }
+
+    try {
+        if (input[0] == 's') {
+            if (input.length() < 1 + PORT_LENGTH + 4 * BUFFER_SIZE) {
+                throw DeviceError("Invalid sensor input format");
+            }
+
+            string port = input.substr(1, PORT_LENGTH);
+            double minVol = stod(input.substr(1 + PORT_LENGTH, BUFFER_SIZE));
+            double maxVol = stod(input.substr(1 + PORT_LENGTH + BUFFER_SIZE, BUFFER_SIZE));
+            double minReading = stod(input.substr(1 + PORT_LENGTH + 2 * BUFFER_SIZE, BUFFER_SIZE));
+            double maxReading = stod(input.substr(1 + PORT_LENGTH + 3 * BUFFER_SIZE, BUFFER_SIZE));
+
+            auto it = find_if(sensors.begin(), sensors.end(),
+                            [&port](const Sensor& s) { return s.port == port; });
+
+            if (it != sensors.end()) {
+                it->minVol = minVol;
+                it->maxVol = maxVol;
+                it->minReading = minReading;
+                it->maxReading = maxReading;
+            } else {
+                Sensor newSensor(port, minVol, maxVol, minReading, maxReading);
+                if (!newSensor.isValid()) {
+                    throw DeviceError("Invalid sensor configuration");
+                }
+                sensors.push_back(newSensor);
             }
         }
-        if (create == true)
-        {
-            Valve newValve = Valve();
-            newValve.port = input.substr(1,4);
-
-            //cout << input.substr(4,1);
-
-            if(stoi(input.substr(5,1)) == 1)
-            {
-                newValve.state = 1;
-            }
-            else
-            {
-                newValve.state = 0;
+        else if (input[0] == 'v') {
+            if (input.length() < 1 + PORT_LENGTH + 1 + VALVE_BUFFER_SIZE) {
+                throw DeviceError("Invalid valve input format");
             }
 
-            newValve.inputVol = stod(input.substr(6,bufferValve));
+            string port = input.substr(1, PORT_LENGTH);
+            bool state = (input[1 + PORT_LENGTH] == '1');
+            double inputVol = stod(input.substr(1 + PORT_LENGTH + 1, VALVE_BUFFER_SIZE));
 
-            valves.push_back(newValve);
+            auto it = find_if(valves.begin(), valves.end(),
+                            [&port](const Valve& v) { return v.port == port; });
+
+            if (it != valves.end()) {
+                it->state = state;
+                it->inputVol = inputVol;
+            } else {
+                Valve newValve(port, inputVol, state);
+                if (!newValve.isValid()) {
+                    throw DeviceError("Invalid valve configuration");
+                }
+                valves.push_back(newValve);
+            }
         }
-        
+        else {
+            throw DeviceError("Invalid device type");
+        }
+    }
+    catch (const std::exception& e) {
+        throw DeviceError(string("Error creating device: ") + e.what());
     }
 }
 
 void updateSensorValue()
 {
-    for(Sensor& s : sensors)
-    {
-
-        s.value = sensorFeedback(s.port) * s.maxReading;
-
+    lock_guard<mutex> lock(device_mutex);
+    
+    for (Sensor& s : sensors) {
+        try {
+            double rawValue = sensorFeedback(s.port);
+            // Apply scaling based on voltage and reading ranges
+            double scale = (s.maxReading - s.minReading) / (s.maxVol - s.minVol);
+            double offset = -s.minVol * scale + s.minReading;
+            s.value = rawValue * scale + offset;
+        }
+        catch (const std::exception& e) {
+            cerr << "Error updating sensor " << s.port << ": " << e.what() << endl;
+        }
     }
 }
 
-double getSensorValue(string port_)
+double getSensorValue(const string& port_)
 {
-    //double val = sensorFeedback(port_);
-
-    for(Sensor& s : sensors)
-    {
-        if(s.port == port_)
-        {
-            return s.value;
-            //val = val * s.maxReading;
-        }
+    lock_guard<mutex> lock(device_mutex);
+    
+    auto it = find_if(sensors.begin(), sensors.end(),
+                     [&port_](const Sensor& s) { return s.port == port_; });
+    
+    if (it != sensors.end()) {
+        return it->value;
     }
+    throw DeviceError("Sensor not found: " + port_);
 }
 
-void changeValveState(string port_, bool state_)
-{  
-    for(Valve& v : valves)
-    {
-        if(v.port == port_)
-        {
-            //cout << "heyop";
-            v.state = state_;
-            if(v.state == true)
-            {
-                //cout << "heyo";
-                setValve(port_, v.inputVol);
-            }
-            else
-            {
-                //cout << "heyo";
-                setValve(port_, 0);
-            }
+void changeValveState(const string& port_, bool state_)
+{
+    lock_guard<mutex> lock(device_mutex);
+    
+    auto it = find_if(valves.begin(), valves.end(),
+                     [&port_](const Valve& v) { return v.port == port_; });
+    
+    if (it != valves.end()) {
+        it->state = state_;
+        try {
+            setValve(port_, state_ ? it->inputVol : 0.0);
         }
-        
+        catch (const std::exception& e) {
+            cerr << "Error setting valve " << port_ << ": " << e.what() << endl;
+            throw DeviceError(string("Error setting valve: ") + e.what());
+        }
+    }
+    else {
+        throw DeviceError("Valve not found: " + port_);
     }
 }
 
 string getValues()
 {
-    string full = "";
-    for(Sensor s : sensors)
-    {
-        full += string(s.port);
-        double val;
+    lock_guard<mutex> lock(device_mutex);
+    stringstream ss;
+    
+    for (const Sensor& s : sensors) {
+        ss << s.port << " " << s.value << ",";
+    }
+    
+    for (const Valve& v : valves) {
+        ss << v.port << (v.state ? " Open," : " Closed,");
+    }
+    
+    return ss.str();
+}
 
-        
-        //double scale = (s.maxReading-s.minReading)/(s.maxVol-s.minVol);
-        //double offset = -s.minVol*(s.maxReading-s.minReading)/(s.maxVol-s.minVol) + s.minReading;
-        //val = s.value*scale + offset;
-        val = s.value;
-        full += " " + to_string(val)+ ","; 
-    }
-    for(Valve v : valves)
-    {
-        full += string(v.port);
-        if(v.state == true)
-        {
-            full += " Open,";
-        }
-        else
-        {
-            full += " Closed,";
-        }
-    }
-    return full;
+void cleanup_devices()
+{
+    lock_guard<mutex> lock(device_mutex);
+    valves.clear();
+    sensors.clear();
 }
